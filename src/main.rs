@@ -1,6 +1,7 @@
 mod config;
 mod db;
 mod error;
+mod components;
 
 use std::path::PathBuf;
 use std::sync::Arc;
