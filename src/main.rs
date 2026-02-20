@@ -1,5 +1,6 @@
 mod config;
 mod db;
+mod error;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -8,37 +9,15 @@ use gpui::*;
 use gpui_component::{Theme, ThemeRegistry, TitleBar, *};
 use tokio::sync::RwLock;
 
-struct AppView {
-    db: Arc<RwLock<Option<db::Database>>>,
-}
-
-impl AppView {
-    fn new(db: Arc<RwLock<Option<db::Database>>>) -> Self {
-        Self { db }
-    }
-}
-
-impl Render for AppView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let bg = cx.theme().background;
-        let fg = cx.theme().foreground;
-
-        div()
-            .size_full()
-            .flex_col()
-            .bg(bg)
-            .text_color(fg)
-            .child(TitleBar::new().child("My Application"))
-            .child(div().flex_1().p_4().child("Hello, World!"))
-    }
-}
+use crate::error::AppError;
+use crate::app::AppState;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = config::load_config().unwrap_or_default();
     let db_config = config.database.clone();
 
-    let (db, _users) = match db::Database::connect(&db_config).await {
+    let db = match db::Database::connect(&db_config).await {
         Ok(database) => {
             database.init_schema().await?;
 
@@ -66,11 +45,11 @@ async fn main() -> anyhow::Result<()> {
 
             let users = database.get_all_users().await?;
             println!("Connected to database: {} with {} users", db_config.name, users.len());
-            (Some(database), users)
+            Some(database)
         }
         Err(e) => {
             eprintln!("Failed to connect to database: {}", e);
-            (None, vec![])
+            None
         }
     };
 
@@ -95,7 +74,8 @@ async fn main() -> anyhow::Result<()> {
         });
 
         cx.open_window(WindowOptions::default(), |window, cx| {
-            let view = cx.new(|_| AppView::new(db.clone()));
+            let app_state = AppState::new(db.clone());
+            let view = cx.new(|_| AppView::new(app_state));
             cx.new(|cx| Root::new(view, window, cx))
         })
         .unwrap();
