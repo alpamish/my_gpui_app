@@ -29,20 +29,68 @@ impl Database {
     }
 
     pub async fn init_schema(&self) -> Result<()> {
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS users (
-                id BIGSERIAL PRIMARY KEY,
-                name VARCHAR(255) NOT NULL,
-                email VARCHAR(255) NOT NULL UNIQUE,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-            )
-            "#,
-        )
-        .execute(&self.pool)
-        .await
-        .map_err(AppError::Database)?;
+        // Read and execute the schema SQL file
+        let schema_sql = include_str!("schema.sql");
+        
+        // Split the schema file into individual statements and execute them
+        let statements = schema_sql.split("-- =====================================================")
+            .filter(|s| !s.trim().is_empty())
+            .flat_map(|section| {
+                // Extract CREATE statements from each section
+                let mut statements = Vec::new();
+                let mut current_statement = String::new();
+                
+                for line in section.lines() {
+                    if line.trim().is_empty() && !current_statement.trim().is_empty() {
+                        statements.push(current_statement.trim().to_string());
+                        current_statement.clear();
+                    } else {
+                        if !line.trim().starts_with("--") && !line.trim().starts_with("CREATE EXTENSION") &&
+                           !line.trim().starts_with("CREATE TYPE") && !line.trim().starts_with("CREATE TABLE") &&
+                           !line.trim().starts_with("CREATE INDEX") && !line.trim().starts_with("ALTER TABLE") &&
+                           !line.trim().starts_with("CREATE OR REPLACE FUNCTION") {
+                            current_statement.push_str(line);
+                            current_statement.push('\n');
+                        } else if line.trim().starts_with("CREATE") || line.trim().starts_with("ALTER") {
+                            if !current_statement.trim().is_empty() {
+                                statements.push(current_statement.trim().to_string());
+                                current_statement.clear();
+                            }
+                            current_statement.push_str(line);
+                            current_statement.push('\n');
+                        } else if !line.trim().starts_with("--") {
+                            current_statement.push_str(line);
+                            current_statement.push('\n');
+                        }
+                    }
+                }
+                
+                if !current_statement.trim().is_empty() {
+                    statements.push(current_statement.trim().to_string());
+                }
+                
+                statements
+            })
+            .filter(|s: &String| {
+                let trimmed = s.trim();
+                !trimmed.is_empty() && 
+                (trimmed.starts_with("CREATE") || 
+                 trimmed.starts_with("ALTER") || 
+                 trimmed.starts_with("INSERT") ||
+                 trimmed.starts_with("UPDATE") ||
+                 trimmed.starts_with("DELETE"))
+            })
+            .collect::<Vec<String>>();
+
+        for statement in statements {
+            let stmt = statement.trim();
+            if !stmt.is_empty() {
+                sqlx::query(stmt)
+                    .execute(&self.pool)
+                    .await
+                    .map_err(AppError::Database)?;
+            }
+        }
 
         Ok(())
     }
