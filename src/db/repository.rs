@@ -3,22 +3,24 @@ use sqlx::postgres::{PgPool, PgPoolOptions, PgRow};
 
 use crate::config::DatabaseConfig;
 use crate::db::models::{CreateUser, UpdateUser, User};
+use crate::error::{AppError, Result};
 
 pub struct Database {
     pool: PgPool,
 }
 
 impl Database {
-    pub async fn new(config: &DatabaseConfig) -> Result<Self, sqlx::Error> {
+    pub async fn new(config: &DatabaseConfig) -> Result<Self> {
         let pool = PgPoolOptions::new()
             .max_connections(5)
             .connect(&config.connection_string())
-            .await?;
+            .await
+            .map_err(AppError::Database)?;
 
         Ok(Self { pool })
     }
 
-    pub async fn connect(config: &DatabaseConfig) -> Result<Self, sqlx::Error> {
+    pub async fn connect(config: &DatabaseConfig) -> Result<Self> {
         Self::new(config).await
     }
 
@@ -26,7 +28,7 @@ impl Database {
         &self.pool
     }
 
-    pub async fn init_schema(&self) -> Result<(), sqlx::Error> {
+    pub async fn init_schema(&self) -> Result<()> {
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS users (
@@ -39,12 +41,13 @@ impl Database {
             "#,
         )
         .execute(&self.pool)
-        .await?;
+        .await
+        .map_err(AppError::Database)?;
 
         Ok(())
     }
 
-    pub async fn create_user(&self, user: CreateUser) -> Result<User, sqlx::Error> {
+    pub async fn create_user(&self, user: CreateUser) -> Result<User> {
         let row = sqlx::query(
             r#"
             INSERT INTO users (name, email)
@@ -55,12 +58,13 @@ impl Database {
         .bind(&user.name)
         .bind(&user.email)
         .fetch_one(&self.pool)
-        .await?;
+        .await
+        .map_err(AppError::Database)?;
 
         Ok(Self::row_to_user(row))
     }
 
-    pub async fn get_user(&self, id: i64) -> Result<Option<User>, sqlx::Error> {
+    pub async fn get_user(&self, id: i64) -> Result<Option<User>> {
         let row = sqlx::query(
             r#"
             SELECT id, name, email, created_at, updated_at
@@ -70,12 +74,13 @@ impl Database {
         )
         .bind(id)
         .fetch_optional(&self.pool)
-        .await?;
+        .await
+        .map_err(AppError::Database)?;
 
         Ok(row.map(Self::row_to_user))
     }
 
-    pub async fn get_all_users(&self) -> Result<Vec<User>, sqlx::Error> {
+    pub async fn get_all_users(&self) -> Result<Vec<User>> {
         let rows = sqlx::query(
             r#"
             SELECT id, name, email, created_at, updated_at
@@ -84,7 +89,8 @@ impl Database {
             "#,
         )
         .fetch_all(&self.pool)
-        .await?;
+        .await
+        .map_err(AppError::Database)?;
 
         Ok(rows.into_iter().map(Self::row_to_user).collect())
     }
@@ -93,7 +99,7 @@ impl Database {
         &self,
         id: i64,
         update: UpdateUser,
-    ) -> Result<Option<User>, sqlx::Error> {
+    ) -> Result<Option<User>> {
         if let (Some(name), Some(email)) = (&update.name, &update.email) {
             let row = sqlx::query(
                 r#"
@@ -107,7 +113,8 @@ impl Database {
             .bind(email)
             .bind(id)
             .fetch_optional(&self.pool)
-            .await?;
+            .await
+            .map_err(AppError::Database)?;
             return Ok(row.map(Self::row_to_user));
         }
 
@@ -123,7 +130,8 @@ impl Database {
             .bind(name)
             .bind(id)
             .fetch_optional(&self.pool)
-            .await?;
+            .await
+            .map_err(AppError::Database)?;
             return Ok(row.map(Self::row_to_user));
         }
 
@@ -139,18 +147,20 @@ impl Database {
             .bind(email)
             .bind(id)
             .fetch_optional(&self.pool)
-            .await?;
+            .await
+            .map_err(AppError::Database)?;
             return Ok(row.map(Self::row_to_user));
         }
 
         self.get_user(id).await
     }
 
-    pub async fn delete_user(&self, id: i64) -> Result<bool, sqlx::Error> {
+    pub async fn delete_user(&self, id: i64) -> Result<bool> {
         let result = sqlx::query("DELETE FROM users WHERE id = $1")
             .bind(id)
             .execute(&self.pool)
-            .await?;
+            .await
+            .map_err(AppError::Database)?;
 
         Ok(result.rows_affected() > 0)
     }
